@@ -44,7 +44,7 @@ void ContinuousDetector::onInit ()
 
   tag_detector_ = std::shared_ptr<TagDetector>(new TagDetector(pnh));
   draw_tag_detections_image_ = getAprilTagOption<bool>(pnh, 
-      "publish_tag_detections_image", false);
+      "publish_tag_detections_image", true);
   it_ = std::shared_ptr<image_transport::ImageTransport>(
       new image_transport::ImageTransport(nh));
 
@@ -53,6 +53,7 @@ void ContinuousDetector::onInit ()
                           &ContinuousDetector::imageCallback, this);
   tag_detections_publisher_ =
       nh.advertise<AprilTagDetectionArray>("tag_detections", 1);
+  apriltag_landmark_publisher_ = nh.advertise<cartographer_ros_msgs::LandmarkList>("/landmark", 1);
   if (draw_tag_detections_image_)
   {
     tag_detections_image_publisher_ = it_->advertise("tag_detections_image", 1);
@@ -87,8 +88,34 @@ void ContinuousDetector::imageCallback (
   }
 
   // Publish detected tags in the image by AprilTag 2
-  tag_detections_publisher_.publish(
-      tag_detector_->detectTags(cv_image_,camera_info));
+  auto tag_detection_array = 
+      tag_detector_->detectTags(cv_image_,camera_info);
+  tag_detections_publisher_.publish(tag_detection_array);
+
+  cartographer_ros_msgs::LandmarkList apriltag_landmark_list;
+  for(int i = 0; i < tag_detection_array.detections.size(); i++)
+  {
+      AprilTagDetection item = tag_detection_array.detections[i];
+
+      //
+      cartographer_ros_msgs::LandmarkEntry landmark_entry;
+      landmark_entry.id = std::to_string(item.id[0]);
+      landmark_entry.tracking_from_landmark_transform.position = item.pose.pose.pose.position;
+      landmark_entry.tracking_from_landmark_transform.orientation = item.pose.pose.pose.orientation;
+      landmark_entry.translation_weight = 1.0;
+      landmark_entry.rotation_weight = 1.0;
+
+      apriltag_landmark_list.landmarks.push_back(landmark_entry);
+
+  }
+   
+  if(apriltag_landmark_list.landmarks.size() != 0)
+  {
+      apriltag_landmark_list.header = tag_detection_array.header;
+      apriltag_landmark_publisher_.publish(apriltag_landmark_list);
+  } 
+
+
 
   // Publish the camera image overlaid by outlines of the detected tags and
   // their payload values
